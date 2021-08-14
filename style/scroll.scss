@@ -6,43 +6,33 @@
   position: relative;
   overflow: hidden;
 
-  &--vertical &__wrapper {
-    display: block;
-  }
-
-  &--horizontal &__wrapper,
-  &--both &__wrapper {
-    display: inline-block;
-  }
-
   &__wrapper {
     position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: scroll;
     vertical-align: top;
     will-change: transform;
     transition-timing-function: cubic-bezier(0.165, 0.84, 0.44, 1);
     transition-duration: 140ms;
     transition-property: transform;
 
-    &--scrolling,
-    &--using-bar,
-    &--no-ready,
-    &--no-transition {
-      transition-duration: 0ms;
-    }
-
-    &--no-ready {
-      display: inline-block;
-    }
-
-    // 与使用 js 找到所有子元素再添加样式相比效率如何 (不太好测试) ?
-    &--scrolling > * {
-      pointer-events: none;
-    }
-
     &::before,
     &::after {
       display: table;
       content: '';
     }
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
+
+  &--vertical &__wrapper {
+    overflow-x: hidden;
+  }
+
+  &--horizontal &__wrapper {
+    overflow-y: hidden;
   }
 }

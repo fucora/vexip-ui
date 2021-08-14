@@ -1,39 +1,28 @@
 <template>
   <Scroll
     ref="scroll"
-    mode="vertical"
+    appear
     pointer
-    no-buffer
     use-x-bar
     use-y-bar
-    autoplay
+    :scroll-y="400"
     :width="200"
     :height="200"
     style="box-shadow: 0 0 4px #ccc;"
   >
-    <div style="width: 500px; height: 400px;">
-      <p>内容</p>
-      <p>内容</p>
-      <p>内容</p>
-      <p>内容</p>
-      <p id="p4">
-        内容4
-      </p>
-      <p>内容</p>
-      <p>内容</p>
-      <p>内容</p>
-      <p>内容</p>
-      <p>内容</p>
-      <!-- <p id="target">
-        内容
-      </p> -->
-      <p>内容</p>
-    </div>
+    <p
+      v-for="i in 20"
+      :key="i"
+      class="content"
+      style="width: 500px;"
+    >
+      {{ i }}
+    </p>
   </Scroll>
 </template>
 
 <script lang="ts">
-import { defineComponent, ref, onMounted } from 'vue'
+import { defineComponent, ref } from 'vue'
 import Scroll from '../scroll.vue'
 
 export default defineComponent({
@@ -44,16 +33,6 @@ export default defineComponent({
   setup() {
     const scroll = ref<InstanceType<typeof Scroll> | null>(null)
 
-    onMounted(() => {
-      window.setTimeout(() => {
-        if (!scroll.value?.content) return
-
-        const target = scroll.value.content.querySelector('#target')
-
-        target && scroll.value.scrollToElement(target)
-      }, 20)
-    })
-
     return {
       scroll
     }
@@ -61,4 +40,16 @@ export default defineComponent({
 })
 </script>
 
-<style lang="scss"></style>
+<style lang="scss">
+.content {
+  padding: 10px;
+  margin: 4px;
+  color: $vxp-color-warning;
+  background-image:
+    linear-gradient(
+      to right,
+      rgba($vxp-color-warning, 0.2),
+      rgba($vxp-color-warning, 0.7)
+    );
+}
+</style>

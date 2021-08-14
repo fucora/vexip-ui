@@ -36,12 +36,12 @@ import {
   getCurrentInstance,
   isVNode
 } from 'vue'
-import { Scroll } from '@/components/scroll'
 import { useConfiguredProps } from '@/common/config/install'
-import { animateScrollTo } from './helper'
+import { animateScrollTo } from '@/components/scroll/helper'
 import { ANCHOR_STATE } from './symbol'
 
 import type { PropType } from 'vue'
+import type { Scroll } from '@/components/scroll'
 import type { LinkState, AnchorState } from './symbol'
 
 const props = useConfiguredProps('anchor', {
@@ -294,10 +294,16 @@ export default defineComponent({
           container.scrollHeight - container.offsetHeight
         )
 
-        animateScrollTo(container, from, to, duration, () => {
-          timer = window.setTimeout(() => {
-            animating.value = false
-          }, 10)
+        animateScrollTo({
+          duration,
+          el: container,
+          yFrom: from,
+          yTo: to,
+          callback: () => {
+            timer = window.setTimeout(() => {
+              animating.value = false
+            }, 10)
+          }
         })
         computeCurrentLink(to)
         computeMarkerPoisiton()

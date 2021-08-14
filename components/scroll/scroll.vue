@@ -1,18 +1,10 @@
 <template>
-  <div
-    ref="wrapper"
-    :class="className"
-    :style="style"
-    @mousedown="handleMouseDown"
-    @touchstart="handleTouchStart"
-    @wheel.exact="handleWheel($event, 'vertical')"
-    @wheel.shift="handleWheel($event, 'horizontal')"
-  >
+  <div :class="className" :style="style" @mousedown="handleMouseDown">
     <div
       ref="content"
       :class="wrapperClass"
-      :style="wrapperStyle"
-      @transitionend="transitionDuration = -1"
+      :style="scrollStyle"
+      @scroll="handleScroll"
     >
       <slot></slot>
     </div>
@@ -24,7 +16,8 @@
       :fade="barFade"
       :bar-length="xBarLength"
       :disabled="!enableXScroll"
-      :duration="transitionDuration"
+      :appear="appear"
+      :duration="barDuration"
       @on-scroll-start="handleBarScrollStart('horizontal')"
       @on-scroll="handleXBarScroll"
       @on-scroll-end="handleBarScrollEnd('horizontal')"
@@ -37,7 +30,8 @@
       :fade="barFade"
       :bar-length="yBarLength"
       :disabled="!enableYScroll"
-      :duration="transitionDuration"
+      :appear="appear"
+      :duration="barDuration"
       @on-scroll-start="handleBarScrollStart('vertical')"
       @on-scroll="handleYBarScroll"
       @on-scroll-end="handleBarScrollEnd('vertical')"
@@ -54,20 +48,24 @@ import { USE_TOUCH } from '@/common/utils/dom-event'
 import { createEventEmitter } from '@/common/utils/event-emitter'
 import { useScrollWrapper } from './mixins'
 
-import type { PropType } from 'vue'
+import type { PropType, CSSProperties } from 'vue'
 import type { EventHandler } from '@/common/utils/event-emitter'
 import type { ScrollMode, ClassType } from './symbol'
 
-const moveEvent = USE_TOUCH ? 'touchmove' : 'mousemove'
-const upEvent = USE_TOUCH ? 'touchend' : 'mouseup'
+const MOVE_EVENT = 'mousemove'
+const UP_EVENT = 'mouseup'
 
 const props = useConfiguredProps('scroll', {
   scrollClass: {
     type: [String, Object] as PropType<ClassType>,
     default: null
   },
+  scrollStyle: {
+    type: Object as PropType<CSSProperties>,
+    default: () => ({})
+  },
   mode: {
-    default: 'vertical' as ScrollMode,
+    default: 'both' as ScrollMode,
     validator: (value: ScrollMode) => {
       return ['horizontal', 'vertical', 'both'].includes(value)
     }
@@ -80,14 +78,6 @@ const props = useConfiguredProps('scroll', {
     type: [Number, String],
     default: ''
   },
-  deltaX: {
-    type: Number,
-    default: 20
-  },
-  deltaY: {
-    type: Number,
-    default: 20
-  },
   disabled: {
     type: Boolean,
     default: false
@@ -96,9 +86,9 @@ const props = useConfiguredProps('scroll', {
     type: Boolean,
     default: false
   },
-  wheel: {
+  wheelDisabled: {
     type: Boolean,
-    default: true
+    default: false
   },
   scrollX: {
     type: Number,
@@ -132,17 +122,18 @@ const props = useConfiguredProps('scroll', {
     type: Number,
     default: 500
   },
-  noBuffer: {
-    type: Boolean,
-    default: false
-  },
-  noTransition: {
-    type: Boolean,
-    default: false
-  },
   beforeScroll: {
     type: Function as PropType<(payload: { signX: number, signY: number }) => boolean>,
     default: null
+  },
+  appear: {
+    type: Boolean,
+    default: false
+  },
+  barDuration: {
+    type: Number,
+    default: null,
+    validator: (value: number) => value >= 0
   }
 })
 
@@ -160,8 +151,7 @@ export default defineComponent({
     'on-scroll',
     'on-scroll-end',
     'on-bar-scroll-start',
-    'on-bar-scroll-end',
-    'on-ready'
+    'on-bar-scroll-end'
   ],
   setup(props, { emit }) {
     const emitter = createEventEmitter()
@@ -169,14 +159,10 @@ export default defineComponent({
     const prefix = 'vxp-scroll'
     const usingBar = ref(false)
     const scrolling = ref(false)
-    const transitionDuration = ref<number>(-1)
 
     const {
-      wrapperElement,
       contentElement,
 
-      wrapper,
-      isReady,
       currentScroll,
       percentX,
       percentY,
@@ -187,12 +173,17 @@ export default defineComponent({
       xBarLength,
       yBarLength,
 
-      verifyScroll,
+      setScrollX,
+      setScrollY,
       computePercent,
-      refresh
+      refresh,
+      scrollTo,
+      scrollBy,
+      scrollToElement
     } = useScrollWrapper({
       mode: toRef(props, 'mode'),
       disabled: toRef(props, 'disabled'),
+      appear: toRef(props, 'appear'),
       width: toRef(props, 'width'),
       height: toRef(props, 'height'),
       scrollX: toRef(props, 'scrollX'),
@@ -233,27 +224,28 @@ export default defineComponent({
     let endTimer: number
 
     function startAutoplay() {
-      if (!canAutoplay.value) return
+      if (!canAutoplay.value || !contentElement.value) return
 
       stopAutoplay()
 
       const mode = props.mode
-      const distance = mode === 'horizontal' ? 'width' : 'height'
+      const distance = mode === 'horizontal' ? 'offsetWidth' : 'offsetHeight'
       const limit = mode === 'horizontal' ? xScrollLimit : yScrollLimit
       const prop = mode === 'horizontal' ? 'x' : 'y'
       const waiting = props.playWaiting < 20 ? 20 : props.playWaiting
+      const setScroll = mode === 'horizontal' ? setScrollX : setScrollY
 
       let playSpeed = 0.5
 
       if (typeof props.autoplay === 'number') {
-        playSpeed = (wrapper[distance] / props.autoplay) * 16
+        playSpeed = (contentElement.value[distance] / props.autoplay) * 16
       }
 
       const scroll = () => {
-        currentScroll[prop] -= playSpeed
+        setScroll(currentScroll[prop] + playSpeed)
 
-        if (currentScroll[prop] <= limit.value) {
-          currentScroll[prop] = limit.value
+        if (currentScroll[prop] >= limit.value) {
+          setScroll(limit.value)
           canPlay.value = false
 
           computePercent()
@@ -319,18 +311,9 @@ export default defineComponent({
         props.scrollClass,
         {
           [`${prefix}__wrapper--scrolling`]: scrolling.value,
-          [`${prefix}__wrapper--no-ready`]: !isReady.value,
-          [`${prefix}__wrapper--using-bar`]: usingBar.value,
-          [`${prefix}__wrapper--no-transition`]: props.noTransition
+          [`${prefix}__wrapper--using-bar`]: usingBar.value
         }
       ]
-    })
-    const wrapperStyle = computed(() => {
-      return {
-        transform: `translate3d(${currentScroll.x}px, ${currentScroll.y}px, 0)`,
-        transitionDuration:
-          transitionDuration.value < 0 ? undefined : `${transitionDuration.value}ms`
-      }
     })
 
     watch(enableXScroll, value => {
@@ -339,20 +322,9 @@ export default defineComponent({
     watch(enableYScroll, value => {
       emit('on-y-enable-change', value)
     })
-    watch(isReady, value => {
-      if (value) emit('on-ready')
-    })
 
     function handleMouseDown(event: MouseEvent) {
       if (!props.pointer || event.button !== 0 || USE_TOUCH) {
-        return false
-      }
-
-      handlePointerDown(event)
-    }
-
-    function handleTouchStart(event: TouchEvent) {
-      if (!props.pointer || event.touches.length !== 1) {
         return false
       }
 
@@ -367,7 +339,7 @@ export default defineComponent({
     let cursorXPosition = 0
     let cursorYPosition = 0
 
-    function handlePointerDown(event: MouseEvent | TouchEvent) {
+    function handlePointerDown(event: MouseEvent) {
       if (!enableXScroll.value && !enableYScroll.value) {
         return false
       }
@@ -375,36 +347,28 @@ export default defineComponent({
       event.preventDefault()
       prepareScroll()
 
-      transitionDuration.value = 0
-
-      const pointer = 'touches' in event ? event.touches[0] : event
-
       xScrollStartAt = currentScroll.x
       yScrollStartAt = currentScroll.y
-      cursorXPosition = pointer.clientX
-      cursorYPosition = pointer.clientY
+      cursorXPosition = event.clientX
+      cursorYPosition = event.clientY
 
-      document.addEventListener(moveEvent, handlePointerMove)
-      document.addEventListener(upEvent, handlePointerUp)
+      document.addEventListener(MOVE_EVENT, handlePointerMove)
+      document.addEventListener(UP_EVENT, handlePointerUp)
 
       emit('on-scroll-start', {
-        clientX: -currentScroll.x,
-        clientY: -currentScroll.y,
+        clientX: currentScroll.x,
+        clientY: currentScroll.y,
         percentX: percentX.value,
         percentY: percentY.value
       })
     }
 
-    function handlePointerMove(event: MouseEvent | TouchEvent) {
+    function handlePointerMove(event: MouseEvent) {
       event.stopPropagation()
+      event.preventDefault()
 
-      if (!USE_TOUCH) {
-        event.preventDefault()
-      }
-
-      const pointer = 'touches' in event ? event.touches[0] : event
-      const signX = pointer.clientX - cursorXPosition > 0 ? 1 : -1
-      const signY = pointer.clientY - cursorYPosition > 0 ? 1 : -1
+      const signX = event.clientX - cursorXPosition > 0 ? 1 : -1
+      const signY = event.clientY - cursorYPosition > 0 ? 1 : -1
 
       if (props.beforeScroll?.({ signX, signY }) === false) {
         return false
@@ -413,101 +377,52 @@ export default defineComponent({
       scrolling.value = true
 
       if (enableXScroll.value) {
-        currentScroll.x = xScrollStartAt + pointer.clientX - cursorXPosition
+        setScrollX(xScrollStartAt - (event.clientX - cursorXPosition))
       }
 
       if (enableYScroll.value) {
-        currentScroll.y = yScrollStartAt + pointer.clientY - cursorYPosition
+        setScrollY(yScrollStartAt - (event.clientY - cursorYPosition))
       }
 
-      if (props.noBuffer) {
-        verifyScroll()
-      } else {
-        computePercent()
-      }
-
-      emitScrollEvent('both')
+      computePercent()
+      emitScrollEvent()
     }
 
     function handlePointerUp() {
-      document.removeEventListener(moveEvent, handlePointerMove)
-      document.removeEventListener(upEvent, handlePointerUp)
-
-      transitionDuration.value = -1
-
-      handleBuffer()
-      verifyScroll()
-      emitScrollEvent('both')
+      document.removeEventListener(MOVE_EVENT, handlePointerMove)
+      document.removeEventListener(UP_EVENT, handlePointerUp)
+      emitScrollEvent()
       emit('on-scroll-end', {
-        clientX: -currentScroll.x,
-        clientY: -currentScroll.y,
+        clientX: currentScroll.x,
+        clientY: currentScroll.y,
         percentX: percentX.value,
         percentY: percentY.value
       })
       startAutoplay()
     }
 
-    // 按下 shift 时为横向滚动，保持和原生操作一致
-    function handleWheel(event: WheelEvent, type: 'vertical' | 'horizontal') {
-      const isVerticalScroll = enableYScroll.value && type === 'vertical'
-      const isHorizontalScroll = enableXScroll.value && type === 'horizontal'
+    function handleScroll() {
+      if (contentElement.value) {
+        const signX = contentElement.value.scrollLeft - currentScroll.x > 0 ? 1 : -1
+        const signY = contentElement.value.scrollTop - currentScroll.y > 0 ? 1 : -1
 
-      // 纵横滚动均使用 deltaY 标记
-      const sign = event.deltaY > 0 ? -1 : 1
+        if (props.beforeScroll?.({ signX, signY }) === false) {
+          contentElement.value.scrollTop = currentScroll.y
+          contentElement.value.scrollLeft = currentScroll.x
 
-      if (
-        props.wheel &&
-        (isVerticalScroll || isHorizontalScroll) &&
-        props.beforeScroll?.({ signX: -sign, signY: -sign }) !== false
-      ) {
-        event.preventDefault()
-        event.stopPropagation()
-      } else {
-        return true
+          return
+        }
+
+        currentScroll.y = contentElement.value.scrollTop
+        currentScroll.x = contentElement.value.scrollLeft
       }
 
-      if (props.mode !== 'both' && props.mode !== type) return false
-
-      prepareScroll()
-
-      const computedDelta = sign * (type === 'horizontal' ? props.deltaX : props.deltaY)
-
-      if (isVerticalScroll) {
-        currentScroll.y += computedDelta
-      } else if (isHorizontalScroll) {
-        currentScroll.x += computedDelta
-      }
-
-      verifyScroll()
-      emitScrollEvent(type)
-
-      emit('on-wheel', {
-        type,
-        sign: -sign,
-        clientX: -currentScroll.x,
-        clientY: -currentScroll.y,
-        percentX: percentX.value,
-        percentY: percentY.value
-      })
-
-      startAutoplay()
+      computePercent()
+      emitScrollEvent()
     }
-
-    let bufferTimer: number
 
     function prepareScroll() {
       stopAutoplay()
-      window.clearTimeout(bufferTimer)
-    }
-
-    function handleBuffer() {
-      if (props.noBuffer) {
-        bufferTimer = window.setTimeout(() => {
-          scrolling.value = false
-        }, 300)
-      } else {
-        scrolling.value = false
-      }
     }
 
     function handleBarScrollStart(type: 'vertical' | 'horizontal') {
@@ -522,123 +437,39 @@ export default defineComponent({
 
     function handleXBarScroll(percent: number) {
       percentX.value = percent
-      currentScroll.x = (percent * xScrollLimit.value) / 100
-
+      setScrollX((percent * xScrollLimit.value) / 100)
       emitScrollEvent('horizontal')
     }
 
     function handleYBarScroll(percent: number) {
       percentY.value = percent
-      currentScroll.y = (percent * yScrollLimit.value) / 100
-
+      setScrollY((percent * yScrollLimit.value) / 100)
       emitScrollEvent('vertical')
     }
 
-    function emitScrollEvent(type: ScrollMode) {
+    function emitScrollEvent(barType?: 'vertical' | 'horizontal') {
       emit('on-scroll', {
-        type,
-        clientX: -currentScroll.x,
-        clientY: -currentScroll.y,
+        barType,
+        clientX: currentScroll.x,
+        clientY: currentScroll.y,
         percentX: percentX.value,
         percentY: percentY.value
       })
       emitter.emit('on-scroll', {
-        type,
-        clientX: -currentScroll.x,
-        clientY: -currentScroll.y,
+        barType,
+        clientX: currentScroll.x,
+        clientY: currentScroll.y,
         percentX: percentX.value,
         percentY: percentY.value
       })
     }
 
-    function scrollTo(clientX: number, clientY: number, duration?: number) {
-      setDuration(duration)
-
-      nextTick(() => {
-        let changed = false
-
-        if (enableXScroll.value && Math.abs(currentScroll.x + clientX) > 0.01) {
-          currentScroll.x = -clientX
-          changed = true
-        }
-
-        if (enableYScroll.value && Math.abs(currentScroll.y + clientY) > 0.01) {
-          currentScroll.y = -clientY
-          changed = true
-        }
-
-        verifyScroll()
-
-        if (!changed) transitionDuration.value = -1
-      })
-    }
-
-    function scrollBy(deltaX: number, deltaY: number, duration?: number) {
-      setDuration(duration)
-
-      nextTick(() => {
-        let changed = false
-
-        if (deltaX && enableXScroll) {
-          currentScroll.x -= deltaX
-          changed = true
-        }
-
-        if (deltaY && enableYScroll) {
-          currentScroll.y -= deltaY
-          changed = true
-        }
-
-        verifyScroll()
-
-        if (!changed) transitionDuration.value = -1
-      })
-    }
-
-    function setDuration(duration?: number) {
-      if (typeof duration === 'number') {
-        transitionDuration.value = duration
-
-        if (transitionDuration.value === 0) {
-          nextTick(() => {
-            transitionDuration.value = -1
-          })
-        }
-      }
-    }
-
     function getXScrollLimit() {
-      return [0, -xScrollLimit.value]
+      return [0, xScrollLimit.value]
     }
 
     function getYScrollLimit() {
-      return [0, -yScrollLimit.value]
-    }
-
-    function scrollToElement(el: string | Element, duration?: number, offset = 0) {
-      if (!contentElement.value) return
-
-      if (typeof el === 'string') {
-        el = contentElement.value.querySelector(el)!
-      }
-
-      if (!(el instanceof Node)) return
-
-      const wrapperRect = contentElement.value.getBoundingClientRect()
-      const elRect = el.getBoundingClientRect()
-
-      let clientX = 0
-      let clientY = 0
-
-      if (props.mode !== 'vertical') {
-        clientX = elRect.left - wrapperRect.left + offset
-      }
-
-      if (props.mode !== 'horizontal') {
-        clientY = elRect.top - wrapperRect.top + offset
-      }
-
-      scrollTo(clientX, clientY, duration)
+      return [0, yScrollLimit.value]
     }
 
     function addScrollListener(listener: EventHandler) {
@@ -652,24 +483,20 @@ export default defineComponent({
     return {
       percentX,
       percentY,
-      transitionDuration,
       currentScroll,
 
       className,
       style,
       wrapperClass,
-      wrapperStyle,
       xBarLength,
       yBarLength,
       enableXScroll,
       enableYScroll,
 
-      wrapper: wrapperElement,
       content: contentElement,
 
       handleMouseDown,
-      handleTouchStart,
-      handleWheel,
+      handleScroll,
       handleBarScrollStart,
       handleBarScrollEnd,
       handleXBarScroll,
@@ -678,9 +505,9 @@ export default defineComponent({
       refresh,
       scrollTo,
       scrollBy,
+      scrollToElement,
       getXScrollLimit,
       getYScrollLimit,
-      scrollToElement,
       addScrollListener,
       removeScrollListener
     }
